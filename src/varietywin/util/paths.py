@@ -37,3 +37,8 @@ def log_dir() -> Path:
     path = Path(_dirs.user_log_dir)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resource_path(name: str) -> Path:
+    """A file shipped inside the package (works from source and in the packaged app)."""
+    return Path(__file__).resolve().parent.parent / "resources" / name

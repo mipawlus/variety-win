@@ -3,6 +3,7 @@ import logging
 import sys
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from . import ipc
@@ -10,6 +11,7 @@ from .config import store
 from .core.engine import RotationEngine
 from .ui.tray import TrayIcon
 from .util.logging_setup import setup_logging
+from .util.paths import resource_path
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
+    app.setWindowIcon(QIcon(str(resource_path("icon.ico"))))
 
     # A second launch hands its commands to the running instance; with no commands it
     # opens that instance's preferences, like Variety does.

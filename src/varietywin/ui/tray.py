@@ -9,8 +9,10 @@ from .preferences.window import PreferencesWindow
 
 class TrayIcon(QSystemTrayIcon):
     def __init__(self, engine: RotationEngine, parent=None):
-        style = QApplication.instance().style()
-        icon = style.standardIcon(QStyle.StandardPixmap.SP_DesktopIcon)
+        icon = QApplication.instance().windowIcon()
+        if icon.isNull():
+            style = QApplication.instance().style()
+            icon = style.standardIcon(QStyle.StandardPixmap.SP_DesktopIcon)
         super().__init__(icon, parent)
         self.engine = engine
         self._preferences: PreferencesWindow | None = None
