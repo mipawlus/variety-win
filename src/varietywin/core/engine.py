@@ -362,24 +362,35 @@ class RotationEngine(QObject):
         )
 
     def _apply_history_entry(self, entry) -> None:
-        local_path = Path(entry.local_path)
+        self._show(self._candidate_from_entry(entry), Path(entry.local_path))
+
+    def _show(self, candidate: ImageCandidate, local_path: Path) -> bool:
+        """Display one specific image. In per-monitor mode it goes on the first monitor."""
         if not local_path.exists():
             self.error_occurred.emit(f"Image no longer available: {local_path}")
-            return
-        # In per-monitor mode history navigation acts on the first monitor.
+            return False
         target = self._targets()[0]
         try:
             self._display(local_path, target)
         except Exception as exc:
-            logger.exception("Failed to set wallpaper from history entry")
+            logger.exception("Failed to set wallpaper %s", local_path)
             self.error_occurred.emit(str(exc))
-            return
-        self.current_candidate = self._candidate_from_entry(entry)
+            return False
+        self.current_candidate = candidate
         self.current_path = local_path
         if target is None:
             self._shown = {}
-        self._shown[target] = (self.current_candidate, local_path)
-        self.wallpaper_changed.emit(self.current_candidate)
+        self._shown[target] = (candidate, local_path)
+        self.wallpaper_changed.emit(candidate)
+        return True
+
+    def show_image(self, candidate: ImageCandidate, local_path: Path) -> None:
+        """Show an image the user picked, and count the rotation interval from now."""
+        if not self._show(candidate, local_path):
+            return
+        self.history.record_shown(candidate, local_path)
+        if self._timer.isActive():
+            self._timer.start()
 
     def previous(self) -> None:
         entry = self.history.previous_entry()

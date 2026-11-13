@@ -11,6 +11,7 @@ from .models import ImageCandidate
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_ENTRIES = 500
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 
 
 def _key(source_id: str, remote_id: str) -> str:
@@ -104,6 +105,53 @@ class HistoryStore:
         if key in self._data.favorites:
             self._data.favorites.remove(key)
             self._save()
+
+    @staticmethod
+    def _candidate(entry: HistoryEntry) -> ImageCandidate:
+        return ImageCandidate(
+            source_id=entry.source_id,
+            remote_id=entry.remote_id,
+            url=entry.url,
+            title=entry.title,
+        )
+
+    def recent_entries(self, limit: int) -> list[tuple[ImageCandidate, Path]]:
+        """Most recently shown first, each image once, only those still on disk."""
+        seen: set[str] = set()
+        result: list[tuple[ImageCandidate, Path]] = []
+        for entry in reversed(self._data.shown):
+            key = _key(entry.source_id, entry.remote_id)
+            if key in seen or key in self._data.banned:
+                continue
+            seen.add(key)
+            path = Path(entry.local_path)
+            if path.exists():
+                result.append((self._candidate(entry), path))
+                if len(result) >= limit:
+                    break
+        return result
+
+    def favorite_entries(self) -> list[tuple[ImageCandidate, Path]]:
+        """Images in the favorites folder, newest first, with their details where known."""
+        by_file_name = {Path(entry.local_path).name: entry for entry in self._data.shown}
+        files = [
+            path
+            for path in favorites_dir().iterdir()
+            if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+
+        result = []
+        for path in files:
+            entry = by_file_name.get(path.name)
+            if entry is not None:
+                candidate = self._candidate(entry)
+            else:
+                candidate = ImageCandidate(
+                    source_id="favorites", remote_id=path.name, url=str(path), title=path.stem
+                )
+            result.append((candidate, path))
+        return result
 
     def current_entry(self) -> HistoryEntry | None:
         if not self._data.shown or self._position < 1:

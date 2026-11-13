@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QStyle, QSystemT
 from ..core.engine import RotationEngine
 from ..core.models import ImageCandidate
 from .preferences.window import PreferencesWindow
+from .selector import WallpaperSelector
 
 
 class TrayIcon(QSystemTrayIcon):
@@ -16,6 +17,7 @@ class TrayIcon(QSystemTrayIcon):
         super().__init__(icon, parent)
         self.engine = engine
         self._preferences: PreferencesWindow | None = None
+        self._selector: WallpaperSelector | None = None
 
         self.setToolTip("Variety for Windows")
 
@@ -24,6 +26,7 @@ class TrayIcon(QSystemTrayIcon):
         self.previous_action = self.menu.addAction("Previous wallpaper", self._on_previous)
         self.pause_action = self.menu.addAction("Pause", self._on_toggle_pause)
         self.quote_action = self.menu.addAction("Next quote", self.engine.next_quote)
+        self.menu.addAction("Choose wallpaper...", self.open_selector)
         self.menu.addSeparator()
         self.favorite_action = self.menu.addAction("Favorite", self._on_toggle_favorite)
         self.favorite_action.setCheckable(True)
@@ -37,10 +40,21 @@ class TrayIcon(QSystemTrayIcon):
         self.setContextMenu(self.menu)
 
         self.engine.wallpaper_changed.connect(self._on_wallpaper_changed)
+        self.activated.connect(self._on_activated)
         self.engine.error_occurred.connect(self._on_error)
 
         self._update_pause_label()
         self._update_favorite_state()
+
+    def open_selector(self) -> None:
+        if self._selector is None:
+            self._selector = WallpaperSelector(self.engine)
+        self._selector.show_and_refresh()
+
+    def _on_activated(self, reason) -> None:
+        # Left click opens the thumbnails; right click shows the menu as usual.
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.open_selector()
 
     def _on_next(self) -> None:
         if not self.engine.next_from_history():

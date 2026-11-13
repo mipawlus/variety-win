@@ -322,3 +322,24 @@ def test_lock_screen_uses_the_first_monitor(env):
     engine = engine_module.RotationEngine(env.config)
     engine.rotate()
     assert env.calls.lock == [env.calls.multi[0][1]]
+
+
+def test_show_image_sets_it_and_records_history(env):
+    engine = engine_module.RotationEngine(env.config)
+    engine.rotate()
+    picked = env.cache / "picked.png"
+    Image.new("RGB", SCREEN).save(picked)
+    candidate = ImageCandidate("favorites", "picked.png", str(picked), title="Picked")
+
+    changed = []
+    engine.wallpaper_changed.connect(changed.append)
+    engine.show_image(candidate, picked)
+    assert env.calls.single[-1] == picked and changed == [candidate]
+    assert engine.current_path == picked
+    assert engine.history.current_entry().remote_id == "picked.png"
+
+    errors = []
+    engine.error_occurred.connect(errors.append)
+    engine.show_image(candidate, env.cache / "missing.png")
+    assert errors and engine.current_path == picked
+    assert len(engine.history._data.shown) == 2
