@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config.schema import AppConfig
+from ...core.filters import EFFECTS, NONE
 from ...platform_win import wallpaper_multi
 from .tab_sources import entry_label
 
@@ -31,12 +32,15 @@ class DisplayTab(QWidget):
 
         effects = QGroupBox("Effects")
         effects_form = QFormLayout(effects)
-        self.grayscale_check = QCheckBox("Grayscale")
-        self.grayscale_check.setChecked(config.filters.grayscale)
-        effects_form.addRow("", self.grayscale_check)
-        self.blur_check = QCheckBox("Blur")
-        self.blur_check.setChecked(config.filters.blur)
-        effects_form.addRow("", self.blur_check)
+        hint = QLabel("One of the ticked effects is picked at random for each wallpaper.")
+        hint.setWordWrap(True)
+        effects_form.addRow(hint)
+        self.effect_checks: dict[str, QCheckBox] = {}
+        for name, (label, _function, _limit) in EFFECTS.items():
+            check = QCheckBox(label)
+            check.setChecked(name in config.filters.effects)
+            self.effect_checks[name] = check
+            effects_form.addRow("", check)
 
         self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
         self.brightness_slider.setRange(20, 150)
@@ -104,8 +108,8 @@ class DisplayTab(QWidget):
             combo.setEnabled(enabled)
 
     def apply_to_config(self) -> None:
-        self.config.filters.grayscale = self.grayscale_check.isChecked()
-        self.config.filters.blur = self.blur_check.isChecked()
+        chosen = [name for name, check in self.effect_checks.items() if check.isChecked()]
+        self.config.filters.effects = chosen or [NONE]
         self.config.filters.brightness = self.brightness_slider.value() / 100
         self.config.requirements.min_size_percent = self.min_size_spin.value()
         self.config.requirements.match_orientation = self.orientation_check.isChecked()

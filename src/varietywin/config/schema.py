@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 CONFIG_SCHEMA_VERSION = 2
 
@@ -24,10 +24,23 @@ class SourceConfig(BaseModel):
 
 
 class FilterConfig(BaseModel):
-    blur: bool = False
-    oblur: bool = False
-    grayscale: bool = False
+    # Names from core.filters.EFFECTS. One is picked at random for each wallpaper;
+    # "none" in the list means some wallpapers are left as they are.
+    effects: list[str] = Field(default_factory=lambda: ["none"])
     brightness: float = 1.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_switches(cls, data):
+        # Earlier versions had separate on/off switches instead of a list.
+        if isinstance(data, dict) and "effects" not in data:
+            effects = []
+            if data.get("grayscale"):
+                effects.append("grayscale")
+            if data.get("blur"):
+                effects.append("heavy_blur")
+            data = {**data, "effects": effects or ["none"]}
+        return data
 
 
 class QuoteConfig(BaseModel):

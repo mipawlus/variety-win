@@ -96,7 +96,7 @@ def test_single_wallpaper_rotation(env):
 
 
 def test_filters_are_applied_and_reapplied(env):
-    env.config.filters.grayscale = True
+    env.config.filters.effects = ["grayscale"]
     engine = engine_module.RotationEngine(env.config)
     engine.rotate()
 
@@ -104,7 +104,7 @@ def test_filters_are_applied_and_reapplied(env):
     assert shown.parent == env.cache / "filtered"
     assert shown != engine.current_path  # history keeps the untouched original
 
-    env.config.filters.grayscale = False
+    env.config.filters.effects = ["none"]
     engine.reapply()
     assert env.calls.single[-1] == engine.current_path
     assert len(engine.history._data.shown) == 1  # reapply is not a rotation
@@ -280,7 +280,7 @@ def test_version_1_config_is_upgraded():
                 "options": {"query": "cats"},
             },
         },
-        "filters": {"blur": True, "quote_enabled": True},
+        "filters": {"blur": True, "quote_enabled": True, "brightness": 0.8},
         "monitors": {"per_monitor_source_ids": {"mon": "wallhaven"}},
     }
     config = AppConfig.model_validate(old)
@@ -289,7 +289,8 @@ def test_version_1_config_is_upgraded():
         ("wallhaven", "wallhaven", False),
     ]
     assert config.sources[1].options == {"query": "cats"}
-    assert config.filters.blur and config.monitors.per_monitor_source_ids == {"mon": "wallhaven"}
+    assert config.filters.effects == ["heavy_blur"] and config.filters.brightness == 0.8
+    assert config.monitors.per_monitor_source_ids == {"mon": "wallhaven"}
     assert AppConfig.model_validate_json(config.model_dump_json()) == config
 
 
@@ -300,7 +301,7 @@ def test_lock_screen_follows_the_wallpaper_without_overlays(env):
 
     env.config.general.change_lock_screen = True
     env.config.clock.enabled = True
-    env.config.filters.grayscale = True
+    env.config.filters.effects = ["grayscale"]
     engine.reapply()
     assert len(env.calls.lock) == 1
     assert env.calls.lock[0].parent == env.cache / "filtered"  # filtered, but no clock
@@ -343,3 +344,20 @@ def test_show_image_sets_it_and_records_history(env):
     engine.show_image(candidate, env.cache / "missing.png")
     assert errors and engine.current_path == picked
     assert len(engine.history._data.shown) == 2
+
+
+def test_each_wallpaper_gets_one_random_effect_that_sticks(env):
+    env.config.filters.effects = ["grayscale", "pixelate", "none"]
+    env.config.clock.enabled = True
+    engine = engine_module.RotationEngine(env.config)
+
+    seen = set()
+    for _ in range(40):
+        engine.rotate()
+        effect = engine._effects[engine.current_path]
+        seen.add(effect)
+        engine._on_clock_tick()  # redrawing must not re-roll the effect
+        assert engine._effects[engine.current_path] == effect
+        assert len(engine._effects) == 1  # nothing piles up
+    assert seen == {"grayscale", "pixelate", "none"}
+    engine.stop()

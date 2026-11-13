@@ -46,6 +46,8 @@ class RotationEngine(QObject):
         self._monitor_sizes: dict[str, tuple[int, int]] = {}
         self._first_monitor: str | None = None
         self._lock_screen_file: Path | None = None
+        # The effect each image got, so redrawing it (e.g. for the clock) keeps its look.
+        self._effects: dict[Path, str] = {}
         # Images that failed the size/orientation requirements during this run.
         self._rejected: set[tuple[str | None, str]] = set()
 
@@ -149,8 +151,11 @@ class RotationEngine(QObject):
         return sources
 
     def _display(self, path: Path, target: str | None) -> None:
+        effect = self._effects.get(path)
+        if effect is None:
+            effect = self._effects[path] = filters.choose_effect(self.config.filters)
         shown_file = filters.apply_filters(
-            path, self.config.filters, cache_dir() / FILTERED_SUBDIR
+            path, self.config.filters, cache_dir() / FILTERED_SUBDIR, effect
         )
         without_overlays = shown_file
 
@@ -273,6 +278,7 @@ class RotationEngine(QObject):
                     if not self._meets_requirements(quality.image_size(local_path), target):
                         self._reject(candidate, target, local_path)
                         continue
+                    self._effects.pop(local_path, None)  # a fresh pick for a fresh showing
                     self._display(local_path, target)
                 except Exception as exc:
                     logger.exception(
@@ -321,6 +327,8 @@ class RotationEngine(QObject):
             return
 
         self._shown = {t: v for t, v in self._shown.items() if t in targets} | new
+        on_screen = {path for _, path in self._shown.values()}
+        self._effects = {p: e for p, e in self._effects.items() if p in on_screen}
         self._displayed_files = {
             t: p for t, p in self._displayed_files.items() if t in self._shown
         }
@@ -341,6 +349,7 @@ class RotationEngine(QObject):
             self.rotate()
             return
         self._advance_quote()
+        self._effects.clear()  # the set of enabled effects may have changed
         self._redisplay()
 
     def _redisplay(self) -> None:
@@ -370,6 +379,7 @@ class RotationEngine(QObject):
             self.error_occurred.emit(f"Image no longer available: {local_path}")
             return False
         target = self._targets()[0]
+        self._effects.pop(local_path, None)
         try:
             self._display(local_path, target)
         except Exception as exc:
