@@ -38,6 +38,9 @@ class RedditSource(ImageSource):
         raw = self.config.get("subreddits", "EarthPorn")
         return [s.strip() for s in raw.split(",") if s.strip()]
 
+    def describe(self) -> str:
+        return ", ".join(f"r/{name}" for name in self._subreddits())
+
     def fetch_candidates(self, count: int = 1) -> list[ImageCandidate]:
         subreddits = self._subreddits()
         if not subreddits:

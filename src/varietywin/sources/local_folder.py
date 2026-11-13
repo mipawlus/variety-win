@@ -28,6 +28,9 @@ class LocalFolderSource(ImageSource):
             errors.append(f"Folder does not exist: {folder}")
         return errors
 
+    def describe(self) -> str:
+        return self.config.get("folder", "") or "(no folder chosen)"
+
     def _list_images(self) -> list[Path]:
         folder = Path(self.config.get("folder", ""))
         if not folder.is_dir():

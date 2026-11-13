@@ -80,17 +80,18 @@ class RotationEngine(QObject):
 
     def _active_sources(self) -> list:
         sources = []
-        for source_id, source_config in self.config.sources.items():
-            if not source_config.enabled:
+        for entry in self.config.sources:
+            if not entry.enabled:
                 continue
-            source_cls = get_source_class(source_id)
+            source_cls = get_source_class(entry.source_id)
             if source_cls is None:
-                logger.warning("Unknown source id: %s", source_id)
+                logger.warning("Unknown source id: %s", entry.source_id)
                 continue
-            source = source_cls(source_config.options)
+            source = source_cls(entry.options)
+            source.entry_id = entry.id
             problems = source.validate_config()
             if problems:
-                logger.warning("Skipping source '%s': %s", source_id, "; ".join(problems))
+                logger.warning("Skipping source '%s': %s", entry.source_id, "; ".join(problems))
                 continue
             sources.append(source)
         return sources
@@ -139,7 +140,7 @@ class RotationEngine(QObject):
     def _sources_for(self, target: str | None, sources: list) -> list:
         wanted = self.config.monitors.per_monitor_source_ids.get(target) if target else None
         if wanted:
-            matching = [s for s in sources if s.id == wanted]
+            matching = [s for s in sources if s.entry_id == wanted]
             if matching:
                 return matching
         return sources

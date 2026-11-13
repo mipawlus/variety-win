@@ -30,6 +30,12 @@ class WallhavenSource(ImageSource):
             ),
         ]
 
+    def _tags(self) -> list[str]:
+        return [tag.strip() for tag in self.config.get("query", "").split(",") if tag.strip()]
+
+    def describe(self) -> str:
+        return ", ".join(self._tags()) or "any wallpaper"
+
     def fetch_candidates(self, count: int = 1) -> list[ImageCandidate]:
         params = {
             "categories": self.config.get("categories", "100"),
@@ -37,7 +43,7 @@ class WallhavenSource(ImageSource):
             "sorting": "random",
         }
         # Several comma-separated tags: each fetch searches for one of them.
-        tags = [tag.strip() for tag in self.config.get("query", "").split(",") if tag.strip()]
+        tags = self._tags()
         if tags:
             params["q"] = random.choice(tags)
         api_key = self.config.get("api_key", "")

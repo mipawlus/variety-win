@@ -31,6 +31,10 @@ class ImageSource(ABC):
     def validate_config(self) -> list[str]:
         return []
 
+    def describe(self) -> str:
+        """Short summary of this entry's options, shown in the sources list."""
+        return ""
+
     @abstractmethod
     def fetch_candidates(self, count: int = 1) -> list[ImageCandidate]:
         ...

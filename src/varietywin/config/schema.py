@@ -1,8 +1,9 @@
 from typing import Any
+from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 
 
 class GeneralSettings(BaseModel):
@@ -11,6 +12,10 @@ class GeneralSettings(BaseModel):
 
 
 class SourceConfig(BaseModel):
+    """One entry in the sources list. `source_id` is the kind of source (e.g. "wallhaven");
+    several entries may share it, each with its own options."""
+
+    id: str = Field(default_factory=lambda: uuid4().hex[:8])
     source_id: str
     enabled: bool = True
     options: dict[str, Any] = Field(default_factory=dict)
@@ -43,19 +48,18 @@ class ImageRequirements(BaseModel):
 
 class MonitorConfig(BaseModel):
     same_on_all_monitors: bool = True
+    # Monitor id -> id of the source entry that monitor is limited to.
     per_monitor_source_ids: dict[str, str] = Field(default_factory=dict)
 
 
 class AppConfig(BaseModel):
     schema_version: int = CONFIG_SCHEMA_VERSION
     general: GeneralSettings = Field(default_factory=GeneralSettings)
-    sources: dict[str, SourceConfig] = Field(
-        default_factory=lambda: {
-            "local_folder": SourceConfig(
-                source_id="local_folder", enabled=False, options={"folder": "", "recursive": True}
-            ),
-            "bing": SourceConfig(source_id="bing", enabled=True, options={"market": "en-US"}),
-            "reddit": SourceConfig(
+    sources: list[SourceConfig] = Field(
+        default_factory=lambda: [
+            SourceConfig(id="bing", source_id="bing", options={"market": "en-US"}),
+            SourceConfig(
+                id="reddit",
                 source_id="reddit",
                 enabled=False,
                 options={
@@ -64,9 +68,9 @@ class AppConfig(BaseModel):
                     "allow_nsfw": False,
                 },
             ),
-            "wallhaven": SourceConfig(
+            SourceConfig(
+                id="wallhaven",
                 source_id="wallhaven",
-                enabled=True,
                 options={
                     "query": "landscape, nature, mountains",
                     "categories": "100",
@@ -74,10 +78,21 @@ class AppConfig(BaseModel):
                     "api_key": "",
                 },
             ),
-        }
+        ]
     )
     filters: FilterConfig = Field(default_factory=FilterConfig)
     requirements: ImageRequirements = Field(default_factory=ImageRequirements)
     quotes: QuoteConfig = Field(default_factory=QuoteConfig)
     clock: ClockConfig = Field(default_factory=ClockConfig)
     monitors: MonitorConfig = Field(default_factory=MonitorConfig)
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _upgrade_v1_sources(cls, value):
+        # Version 1 stored exactly one entry per kind of source, as a dict keyed by kind.
+        if isinstance(value, dict):
+            return [
+                {**entry, "id": key} if isinstance(entry, dict) else entry
+                for key, entry in value.items()
+            ]
+        return value

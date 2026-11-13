@@ -74,12 +74,13 @@ def env(tmp_path, monkeypatch, qapp):
     )
 
     config = AppConfig(
-        sources={
-            "a": SourceConfig(source_id="a"),
-            "b": SourceConfig(source_id="b"),
-        }
+        sources=[
+            SourceConfig(id="entry-a", source_id="a"),
+            SourceConfig(id="entry-b", source_id="b"),
+        ]
     )
-    return SimpleNamespace(config=config, calls=calls, cache=cache, sources=sources)
+    entry = {e.source_id: e for e in config.sources}
+    return SimpleNamespace(config=config, calls=calls, cache=cache, sources=sources, entry=entry)
 
 
 def test_single_wallpaper_rotation(env):
@@ -109,7 +110,7 @@ def test_filters_are_applied_and_reapplied(env):
 def test_per_monitor_rotation_uses_distinct_images_and_mapped_sources(env):
     env.calls.monitors[:] = ["m1", "m2"]
     env.config.monitors.same_on_all_monitors = False
-    env.config.monitors.per_monitor_source_ids = {"m1": "a", "m2": "b"}
+    env.config.monitors.per_monitor_source_ids = {"m1": "entry-a", "m2": "entry-b"}
     engine = engine_module.RotationEngine(env.config)
 
     for _ in range(5):
@@ -127,7 +128,7 @@ def test_per_monitor_rotation_uses_distinct_images_and_mapped_sources(env):
 def test_per_monitor_never_repeats_an_image_across_monitors(env):
     env.calls.monitors[:] = ["m1", "m2", "m3"]
     env.config.monitors.same_on_all_monitors = False
-    env.config.sources["b"].enabled = False
+    env.entry["b"].enabled = False
     engine = engine_module.RotationEngine(env.config)
 
     for _ in range(10):
@@ -157,7 +158,7 @@ def test_reapply_rotates_when_monitor_mode_changes(env):
 def test_small_and_portrait_images_are_skipped(env):
     sizes = {"0": (300, 200), "1": (500, 1000), "2": (300, 200), "3": (40, 40), "4": (600, 300)}
     env.sources["a"] = _fake_source("a", env.cache, count=5, sizes=sizes)
-    env.config.sources["b"].enabled = False
+    env.entry["b"].enabled = False
     engine = engine_module.RotationEngine(env.config)
 
     for _ in range(4):
@@ -189,7 +190,7 @@ def test_reported_resolution_avoids_download(env):
             return super().download(candidate, dest_dir)
 
     env.sources["a"] = Reporting
-    env.config.sources["b"].enabled = False
+    env.entry["b"].enabled = False
     engine = engine_module.RotationEngine(env.config)
     engine.rotate()
     engine.rotate()
@@ -224,14 +225,14 @@ def test_quote_and_clock_are_drawn_on_a_screen_sized_copy(env):
 
 
 def test_sources_that_are_not_set_up_are_skipped(env):
-    env.config.sources["a"].options["broken"] = True
+    env.entry["a"].options["broken"] = True
     engine = engine_module.RotationEngine(env.config)
     assert engine.has_usable_sources()
     for _ in range(5):
         engine.rotate()
     assert all(path.name.startswith("b-") for path in env.calls.single)
 
-    env.config.sources["b"].options["broken"] = True
+    env.entry["b"].options["broken"] = True
     errors = []
     engine.error_occurred.connect(errors.append)
     assert not engine.has_usable_sources()
@@ -244,8 +245,46 @@ def test_default_config_works_without_a_folder():
 
     config = AppConfig()
     ready = [
-        source_id
-        for source_id, source in config.sources.items()
-        if source.enabled and not get_source_class(source_id)(source.options).validate_config()
+        entry.source_id
+        for entry in config.sources
+        if entry.enabled
+        and not get_source_class(entry.source_id)(entry.options).validate_config()
     ]
     assert ready == ["bing", "wallhaven"]
+
+
+def test_same_kind_of_source_can_be_added_twice(env):
+    env.config.sources = [
+        SourceConfig(id="one", source_id="a", options={"tag": "forest"}),
+        SourceConfig(id="two", source_id="a", options={"tag": "space"}, enabled=False),
+    ]
+    engine = engine_module.RotationEngine(env.config)
+    assert [(s.entry_id, s.options["tag"]) for s in engine._active_sources()] == [
+        ("one", "forest")
+    ]
+    env.config.sources[1].enabled = True
+    assert [s.entry_id for s in engine._active_sources()] == ["one", "two"]
+
+
+def test_version_1_config_is_upgraded():
+    old = {
+        "schema_version": 1,
+        "sources": {
+            "local_folder": {"source_id": "local_folder", "enabled": True, "options": {}},
+            "wallhaven": {
+                "source_id": "wallhaven",
+                "enabled": False,
+                "options": {"query": "cats"},
+            },
+        },
+        "filters": {"blur": True, "quote_enabled": True},
+        "monitors": {"per_monitor_source_ids": {"mon": "wallhaven"}},
+    }
+    config = AppConfig.model_validate(old)
+    assert [(e.id, e.source_id, e.enabled) for e in config.sources] == [
+        ("local_folder", "local_folder", True),
+        ("wallhaven", "wallhaven", False),
+    ]
+    assert config.sources[1].options == {"query": "cats"}
+    assert config.filters.blur and config.monitors.per_monitor_source_ids == {"mon": "wallhaven"}
+    assert AppConfig.model_validate_json(config.model_dump_json()) == config

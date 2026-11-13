@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ...config.schema import AppConfig
 from ...platform_win import wallpaper_multi
-from ...sources.registry import SOURCE_REGISTRY
+from .tab_sources import entry_label
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,8 @@ class DisplayTab(QWidget):
         for monitor in monitors:
             combo = QComboBox()
             combo.addItem(ANY_SOURCE_LABEL, "")
-            for source_id, source_cls in SOURCE_REGISTRY.items():
-                combo.addItem(source_cls.display_name, source_id)
+            for entry in config.sources:
+                combo.addItem(entry_label(entry), entry.id)
             index = combo.findData(config.monitors.per_monitor_source_ids.get(monitor.id, ""))
             combo.setCurrentIndex(max(index, 0))
             self._source_combos[monitor.id] = combo

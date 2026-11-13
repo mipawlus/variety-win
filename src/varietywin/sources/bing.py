@@ -17,6 +17,9 @@ class BingSource(ImageSource):
     def config_fields(cls) -> list[ConfigField]:
         return [ConfigField(key="market", label="Market", type="str", default="en-US")]
 
+    def describe(self) -> str:
+        return self.config.get("market", "en-US")
+
     def fetch_candidates(self, count: int = 1) -> list[ImageCandidate]:
         market = self.config.get("market", "en-US")
         params = {"format": "js", "idx": 0, "n": min(max(count, 1), 8), "mkt": market}
