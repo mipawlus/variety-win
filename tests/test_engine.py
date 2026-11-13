@@ -60,7 +60,10 @@ def env(tmp_path, monkeypatch, qapp):
         lambda self, target: self._monitor_sizes.get(target, SCREEN),
     )
 
-    calls = SimpleNamespace(single=[], multi=[], monitors=[])
+    calls = SimpleNamespace(single=[], multi=[], monitors=[], lock=[])
+    monkeypatch.setattr(
+        engine_module.lockscreen, "set_lock_screen_in_background", calls.lock.append
+    )
     monkeypatch.setattr(engine_module.wallpaper_single, "set_wallpaper", calls.single.append)
     monkeypatch.setattr(
         engine_module.wallpaper_multi,
@@ -288,3 +291,34 @@ def test_version_1_config_is_upgraded():
     assert config.sources[1].options == {"query": "cats"}
     assert config.filters.blur and config.monitors.per_monitor_source_ids == {"mon": "wallhaven"}
     assert AppConfig.model_validate_json(config.model_dump_json()) == config
+
+
+def test_lock_screen_follows_the_wallpaper_without_overlays(env):
+    engine = engine_module.RotationEngine(env.config)
+    engine.rotate()
+    assert not env.calls.lock  # off by default
+
+    env.config.general.change_lock_screen = True
+    env.config.clock.enabled = True
+    env.config.filters.grayscale = True
+    engine.reapply()
+    assert len(env.calls.lock) == 1
+    assert env.calls.lock[0].parent == env.cache / "filtered"  # filtered, but no clock
+    assert env.calls.single[-1].parent == env.cache / "overlay"
+
+    engine._on_clock_tick()  # the clock redraws; the lock screen is left alone
+    assert len(env.calls.lock) == 1
+
+    for _ in range(4):
+        engine.rotate()
+    assert len(env.calls.lock) >= 2
+    engine.stop()
+
+
+def test_lock_screen_uses_the_first_monitor(env):
+    env.calls.monitors[:] = ["m1", "m2"]
+    env.config.monitors.same_on_all_monitors = False
+    env.config.general.change_lock_screen = True
+    engine = engine_module.RotationEngine(env.config)
+    engine.rotate()
+    assert env.calls.lock == [env.calls.multi[0][1]]

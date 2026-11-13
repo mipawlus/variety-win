@@ -25,6 +25,10 @@ class GeneralTab(QWidget):
         self.paused_check.setChecked(config.general.paused)
         layout.addRow("", self.paused_check)
 
+        self.lock_screen_check = QCheckBox("Also change the lock screen picture")
+        self.lock_screen_check.setChecked(config.general.change_lock_screen)
+        layout.addRow("", self.lock_screen_check)
+
         self.autostart_check = QCheckBox("Start when I sign in to Windows")
         self._autostart_initial = autostart.is_enabled()
         self.autostart_check.setChecked(self._autostart_initial)
@@ -33,6 +37,7 @@ class GeneralTab(QWidget):
     def apply_to_config(self) -> None:
         self.config.general.rotation_interval_seconds = self.interval_spin.value()
         self.config.general.paused = self.paused_check.isChecked()
+        self.config.general.change_lock_screen = self.lock_screen_check.isChecked()
         wanted = self.autostart_check.isChecked()
         if wanted != self._autostart_initial:
             try:

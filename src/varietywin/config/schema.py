@@ -9,6 +9,8 @@ CONFIG_SCHEMA_VERSION = 2
 class GeneralSettings(BaseModel):
     rotation_interval_seconds: int = 300
     paused: bool = False
+    # Also use each new wallpaper as the lock screen picture.
+    change_lock_screen: bool = False
 
 
 class SourceConfig(BaseModel):

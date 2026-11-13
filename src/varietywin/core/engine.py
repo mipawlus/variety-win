@@ -8,7 +8,7 @@ from PySide6.QtCore import QDate, QLocale, QObject, QTime, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
 from ..config.schema import AppConfig
-from ..platform_win import wallpaper_multi, wallpaper_single
+from ..platform_win import lockscreen, wallpaper_multi, wallpaper_single
 from ..sources.registry import get_source_class
 from ..util.paths import cache_dir
 from . import filters, overlay, quality, quotes
@@ -44,6 +44,8 @@ class RotationEngine(QObject):
         self._shown: dict[str | None, tuple[ImageCandidate, Path]] = {}
         self._displayed_files: dict[str | None, Path] = {}
         self._monitor_sizes: dict[str, tuple[int, int]] = {}
+        self._first_monitor: str | None = None
+        self._lock_screen_file: Path | None = None
         # Images that failed the size/orientation requirements during this run.
         self._rejected: set[tuple[str | None, str]] = set()
 
@@ -111,6 +113,7 @@ class RotationEngine(QObject):
         if len(monitors) < 2:
             return [None]
         self._monitor_sizes = {m.id: (m.width, m.height) for m in monitors}
+        self._first_monitor = monitors[0].id
         return [m.id for m in monitors]
 
     def _screen_size(self, target: str | None) -> tuple[int, int] | None:
@@ -149,6 +152,7 @@ class RotationEngine(QObject):
         shown_file = filters.apply_filters(
             path, self.config.filters, cache_dir() / FILTERED_SUBDIR
         )
+        without_overlays = shown_file
 
         overlay_dir = cache_dir() / OVERLAY_SUBDIR
         quote = self._current_quote()
@@ -174,6 +178,21 @@ class RotationEngine(QObject):
         self._displayed_files[target] = shown_file
         if previous and previous != shown_file and previous.parent == overlay_dir:
             previous.unlink(missing_ok=True)
+
+        self._sync_lock_screen(target, without_overlays)
+
+    def _sync_lock_screen(self, target: str | None, image: Path) -> None:
+        """Mirror the wallpaper (of the first monitor) on the lock screen, without the
+        quote and clock: a clock drawn into a lock screen picture would be wrong at once."""
+        if not self.config.general.change_lock_screen:
+            self._lock_screen_file = None
+            return
+        if target is not None and target != self._first_monitor:
+            return
+        if image == self._lock_screen_file:
+            return  # e.g. the clock redrawing every minute
+        self._lock_screen_file = image
+        lockscreen.set_lock_screen_in_background(image)
 
     def _current_quote(self) -> quotes.Quote | None:
         if not self.config.quotes.enabled:

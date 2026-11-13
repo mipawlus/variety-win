@@ -22,6 +22,9 @@ $resources = Join-Path $root "src\varietywin\resources"
     --name VarietyWin `
     --noconsole `
     --noconfirm `
+    --hidden-import winrt.windows.foundation `
+    --hidden-import winrt.windows.foundation.collections `
+    --hidden-import winrt.windows.storage.streams `
     --clean `
     --icon "$resources\icon.ico" `
     --add-data "$resources;varietywin\resources" `
