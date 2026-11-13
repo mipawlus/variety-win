@@ -13,6 +13,7 @@ class TrayIcon(QSystemTrayIcon):
         icon = style.standardIcon(QStyle.StandardPixmap.SP_DesktopIcon)
         super().__init__(icon, parent)
         self.engine = engine
+        self._preferences: PreferencesWindow | None = None
 
         self.setToolTip("Variety for Windows")
 
@@ -20,6 +21,7 @@ class TrayIcon(QSystemTrayIcon):
         self.next_action = self.menu.addAction("Next wallpaper", self._on_next)
         self.previous_action = self.menu.addAction("Previous wallpaper", self._on_previous)
         self.pause_action = self.menu.addAction("Pause", self._on_toggle_pause)
+        self.quote_action = self.menu.addAction("Next quote", self.engine.next_quote)
         self.menu.addSeparator()
         self.favorite_action = self.menu.addAction("Favorite", self._on_toggle_favorite)
         self.favorite_action.setCheckable(True)
@@ -50,6 +52,7 @@ class TrayIcon(QSystemTrayIcon):
         self._update_pause_label()
 
     def _update_pause_label(self) -> None:
+        self.quote_action.setVisible(self.engine.config.quotes.enabled)
         paused = self.engine.config.general.paused
         self.pause_action.setText("Resume" if paused else "Pause")
 
@@ -86,11 +89,44 @@ class TrayIcon(QSystemTrayIcon):
         QMessageBox.information(None, "Image info", "\n".join(lines))
 
     def _on_open_preferences(self) -> None:
+        self.open_preferences()
+
+    def open_preferences(self, initial_tab: str | None = None) -> None:
+        if self._preferences is not None:
+            self._preferences.raise_()
+            self._preferences.activateWindow()
+            return
+
         def _on_saved() -> None:
             self.engine.start()
+            self.engine.reapply()
+            self._update_pause_label()
 
-        dialog = PreferencesWindow(self.engine.config, on_saved=_on_saved)
-        dialog.exec()
+        self._preferences = PreferencesWindow(
+            self.engine.config, on_saved=_on_saved, initial_tab=initial_tab
+        )
+        try:
+            self._preferences.exec()
+        finally:
+            self._preferences = None
+
+    def handle_command(self, command: str) -> None:
+        """Run a command received from the command line (see ipc.COMMANDS)."""
+        paused = self.engine.config.general.paused
+        handlers = {
+            "next": self._on_next,
+            "previous": self._on_previous,
+            "pause": lambda: paused or self._on_toggle_pause(),
+            "resume": lambda: paused and self._on_toggle_pause(),
+            "toggle-pause": self._on_toggle_pause,
+            "favorite": self._on_toggle_favorite,
+            "trash": self._on_trash,
+            "preferences": self._on_open_preferences,
+            "quit": self._on_quit,
+        }
+        handler = handlers.get(command)
+        if handler is not None:
+            handler()
 
     def _on_quit(self) -> None:
         QApplication.instance().quit()

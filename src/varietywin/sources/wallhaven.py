@@ -7,6 +7,7 @@ from ..core.models import ImageCandidate
 from .base import ConfigField, ImageSource
 
 API_URL = "https://wallhaven.cc/api/v1/search"
+DEFAULT_TAGS = "landscape, nature, mountains"
 
 
 class WallhavenSource(ImageSource):
@@ -17,7 +18,9 @@ class WallhavenSource(ImageSource):
     @classmethod
     def config_fields(cls) -> list[ConfigField]:
         return [
-            ConfigField(key="query", label="Search query", type="str", default=""),
+            ConfigField(
+                key="query", label="Tags (comma-separated)", type="str", default=DEFAULT_TAGS
+            ),
             ConfigField(
                 key="categories", label="Categories (general/anime/people)", type="str", default="100"
             ),
@@ -33,9 +36,10 @@ class WallhavenSource(ImageSource):
             "purity": self.config.get("purity", "100"),
             "sorting": "random",
         }
-        query = self.config.get("query", "")
-        if query:
-            params["q"] = query
+        # Several comma-separated tags: each fetch searches for one of them.
+        tags = [tag.strip() for tag in self.config.get("query", "").split(",") if tag.strip()]
+        if tags:
+            params["q"] = random.choice(tags)
         api_key = self.config.get("api_key", "")
         if api_key:
             params["apikey"] = api_key

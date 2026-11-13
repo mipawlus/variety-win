@@ -21,7 +21,24 @@ class FilterConfig(BaseModel):
     oblur: bool = False
     grayscale: bool = False
     brightness: float = 1.0
-    quote_enabled: bool = False
+
+
+class QuoteConfig(BaseModel):
+    enabled: bool = False
+    # Text file with one quote per line ("text -- author"). Empty = built-in quotes.
+    file: str = ""
+
+
+class ClockConfig(BaseModel):
+    enabled: bool = False
+    show_date: bool = True
+
+
+class ImageRequirements(BaseModel):
+    # Smallest acceptable image, as a percentage of the screen's width and height. 0 = any size.
+    min_size_percent: int = Field(default=50, ge=0, le=100)
+    # Skip portrait images on landscape screens and the other way round.
+    match_orientation: bool = True
 
 
 class MonitorConfig(BaseModel):
@@ -35,9 +52,9 @@ class AppConfig(BaseModel):
     sources: dict[str, SourceConfig] = Field(
         default_factory=lambda: {
             "local_folder": SourceConfig(
-                source_id="local_folder", enabled=True, options={"folder": "", "recursive": True}
+                source_id="local_folder", enabled=False, options={"folder": "", "recursive": True}
             ),
-            "bing": SourceConfig(source_id="bing", enabled=False, options={"market": "en-US"}),
+            "bing": SourceConfig(source_id="bing", enabled=True, options={"market": "en-US"}),
             "reddit": SourceConfig(
                 source_id="reddit",
                 enabled=False,
@@ -49,10 +66,18 @@ class AppConfig(BaseModel):
             ),
             "wallhaven": SourceConfig(
                 source_id="wallhaven",
-                enabled=False,
-                options={"query": "", "categories": "100", "purity": "100", "api_key": ""},
+                enabled=True,
+                options={
+                    "query": "landscape, nature, mountains",
+                    "categories": "100",
+                    "purity": "100",
+                    "api_key": "",
+                },
             ),
         }
     )
     filters: FilterConfig = Field(default_factory=FilterConfig)
+    requirements: ImageRequirements = Field(default_factory=ImageRequirements)
+    quotes: QuoteConfig = Field(default_factory=QuoteConfig)
+    clock: ClockConfig = Field(default_factory=ClockConfig)
     monitors: MonitorConfig = Field(default_factory=MonitorConfig)
