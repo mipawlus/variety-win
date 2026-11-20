@@ -9,6 +9,20 @@ from .base import ConfigField, ImageSource
 API_URL = "https://wallhaven.cc/api/v1/search"
 DEFAULT_TAGS = "landscape, nature, mountains"
 
+# Label shown in the preferences -> what the API is asked for.
+PICK_FROM = {
+    "Top rated": {"sorting": "toplist", "topRange": "1y"},
+    "Most favorited": {"sorting": "favorites"},
+    "Random": {"sorting": "random"},
+}
+DEFAULT_PICK = "Top rated"
+# Ranked lists are spread over pages; a random one of the first few gives variety
+# without dropping to the weaker end of the list.
+MAX_PAGE = 8
+
+# Number of result pages per search, learned from the responses.
+_last_pages: dict[tuple, int] = {}
+
 
 class WallhavenSource(ImageSource):
     id = "wallhaven"
@@ -20,6 +34,13 @@ class WallhavenSource(ImageSource):
         return [
             ConfigField(
                 key="query", label="Tags (comma-separated)", type="str", default=DEFAULT_TAGS
+            ),
+            ConfigField(
+                key="pick_from",
+                label="Pick from",
+                type="choice",
+                choices=list(PICK_FROM),
+                default=DEFAULT_PICK,
             ),
             ConfigField(
                 key="categories", label="Categories (general/anime/people)", type="str", default="100"
@@ -40,12 +61,15 @@ class WallhavenSource(ImageSource):
         params = {
             "categories": self.config.get("categories", "100"),
             "purity": self.config.get("purity", "100"),
-            "sorting": "random",
+            **PICK_FROM.get(self.config.get("pick_from", DEFAULT_PICK), PICK_FROM[DEFAULT_PICK]),
         }
         # Several comma-separated tags: each fetch searches for one of them.
         tags = self._tags()
         if tags:
             params["q"] = random.choice(tags)
+        search = tuple(sorted(params.items()))
+        if params["sorting"] != "random":
+            params["page"] = random.randint(1, min(MAX_PAGE, _last_pages.get(search, 1)))
         api_key = self.config.get("api_key", "")
         if api_key:
             params["apikey"] = api_key
@@ -53,6 +77,9 @@ class WallhavenSource(ImageSource):
         resp = requests.get(API_URL, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
+        last_page = (data.get("meta") or {}).get("last_page")
+        if isinstance(last_page, int) and last_page > 0:
+            _last_pages[search] = last_page
 
         results = data.get("data", [])
         if not results:

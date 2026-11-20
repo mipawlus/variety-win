@@ -117,5 +117,5 @@ def apply_filters(source: Path, filters: FilterConfig, out_dir: Path, effect: st
     if _brightness_changed(filters):
         image = ImageEnhance.Brightness(image).enhance(filters.brightness)
 
-    image.save(dest, "JPEG", quality=92)
+    image.save(dest, "JPEG", quality=95, subsampling=0)
     return dest

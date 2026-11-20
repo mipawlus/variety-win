@@ -166,7 +166,11 @@ def test_small_and_portrait_images_are_skipped(env):
 
     for _ in range(4):
         engine.rotate()
-    assert {path.name for path in env.calls.single} == {"a-4.png"}
+    # 600x300 is smaller than the 1000x500 screen, so Windows gets a screen-sized copy
+    assert all(path.name.startswith("a-4-") for path in env.calls.single)
+    assert len(env.calls.single) == 4
+    with Image.open(env.calls.single[-1]) as shown:
+        assert shown.size == SCREEN
     # rejected downloads do not pile up in the cache
     assert sorted(p.name for p in env.cache.glob("*.png")) == ["a-4.png"]
 
@@ -175,7 +179,7 @@ def test_small_and_portrait_images_are_skipped(env):
     engine.reapply()  # settings changed: earlier rejections are forgotten
     for _ in range(30):
         engine.rotate()
-    assert len({path.name for path in env.calls.single}) == 5
+    assert {path.name.split("-")[1] for path in env.calls.single} == set("01234")
 
 
 def test_reported_resolution_avoids_download(env):
@@ -361,3 +365,101 @@ def test_each_wallpaper_gets_one_random_effect_that_sticks(env):
         assert len(engine._effects) == 1  # nothing piles up
     assert seen == {"grayscale", "pixelate", "none"}
     engine.stop()
+
+
+def _failing_source(source_id, exc):
+    class Failing:
+        id = source_id
+        display_name = source_id.title()
+        calls = 0
+
+        def __init__(self, options):
+            pass
+
+        def validate_config(self):
+            return []
+
+        def fetch_candidates(self, count=3, **_):
+            type(self).calls += 1
+            raise exc
+
+    return Failing
+
+
+def _http_error(status):
+    import requests
+
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(f"{status} error", response=response)
+
+
+def test_a_failing_source_is_quiet_when_another_one_works(env):
+    env.sources["a"] = _failing_source("a", _http_error(502))
+    engine = engine_module.RotationEngine(env.config)
+    errors = []
+    engine.error_occurred.connect(errors.append)
+    for _ in range(5):
+        engine.rotate()
+    assert len(env.calls.single) == 5 and errors == []
+    assert env.sources["a"].calls <= 5  # at most once per rotation, not on every attempt
+
+
+def test_when_every_source_fails_the_message_says_why(env):
+    import requests
+
+    env.sources["a"] = _failing_source("a", _http_error(502))
+    env.sources["b"] = _failing_source("b", requests.ReadTimeout("read timed out"))
+    engine = engine_module.RotationEngine(env.config)
+    errors = []
+    engine.error_occurred.connect(errors.append)
+    engine.rotate()
+    (message,) = errors
+    assert "A: the server has a problem right now (error 502)" in message
+    assert "B: the server did not answer in time" in message
+    assert "HTTPSConnectionPool" not in message
+    assert "already have" not in message  # nothing downloaded yet to fall back on
+    assert not env.calls.single
+
+
+def test_describe_error():
+    import requests
+
+    describe = engine_module.describe_error
+    assert "API key" in describe(_http_error(401))
+    assert "too many" in describe(_http_error(429))
+    assert "online" in describe(requests.ConnectionError("x"))
+    assert describe(ValueError("odd")) == "odd"
+
+
+def test_outage_falls_back_to_downloaded_images_and_reports_once(env):
+    engine = engine_module.RotationEngine(env.config)
+    for _ in range(6):
+        engine.rotate()
+    have = set(env.calls.single)
+    assert len(have) >= 2
+
+    working = dict(env.sources)
+    env.sources["a"] = _failing_source("a", _http_error(502))
+    env.sources["b"] = _failing_source("b", _http_error(502))
+    errors = []
+    engine.error_occurred.connect(errors.append)
+    for _ in range(5):
+        before = engine.current_path
+        engine.rotate()
+        assert env.calls.single[-1] in have  # still changing, from what is on disk
+        assert engine.current_path != before
+    assert len(errors) == 1 and "already have" in errors[0]
+
+    env.sources.update(working)  # the servers are back
+    engine.rotate()
+    env.sources["a"] = _failing_source("a", _http_error(502))
+    env.sources["b"] = _failing_source("b", _http_error(502))
+    engine.rotate()
+    assert len(errors) == 2  # a new outage is reported again
+
+
+def test_images_already_screen_sized_are_used_as_they_are(env):
+    engine = engine_module.RotationEngine(env.config)
+    engine.rotate()
+    assert env.calls.single[-1] == engine.current_path  # no needless re-encode

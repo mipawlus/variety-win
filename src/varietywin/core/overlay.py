@@ -106,9 +106,16 @@ def render(
 ) -> Path:
     """Write `base`, scaled and cropped to fill `screen`, with the overlays drawn on top.
 
+    Also used without overlays: scaling here with a good filter looks better than
+    letting Windows shrink a much larger image.
+
     `clock` is (time, date) as already formatted text; an empty date is left out.
     """
     with Image.open(base) as opened:
+        # Lets the JPEG decoder skip detail the screen cannot show: much faster for
+        # huge images. Square request, as the image may still be rotated by EXIF.
+        edge = max(screen)
+        opened.draft("RGB", (edge, edge))
         image = ImageOps.exif_transpose(opened).convert("RGB")
     image = ImageOps.fit(image, screen, Image.Resampling.LANCZOS).convert("RGBA")
 
@@ -121,5 +128,5 @@ def render(
         _draw_quote(draw, screen, margin, quote)
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    Image.alpha_composite(image, layer).convert("RGB").save(dest, "JPEG", quality=92)
+    Image.alpha_composite(image, layer).convert("RGB").save(dest, "JPEG", quality=95, subsampling=0)
     return dest

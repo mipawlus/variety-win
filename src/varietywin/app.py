@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 from . import ipc
 from .config import store
 from .core.engine import RotationEngine
+from .platform_win import desktop_quality
 from .ui.tray import TrayIcon
 from .util.logging_setup import setup_logging
 from .util.paths import resource_path
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = store.load()
+    desktop_quality.ensure_full_quality()
 
     engine = RotationEngine(config)
     tray = TrayIcon(engine)

@@ -4,6 +4,7 @@ import random
 import time
 from pathlib import Path
 
+import requests
 from PySide6.QtCore import QDate, QLocale, QObject, QTime, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
@@ -19,12 +20,32 @@ from .models import ImageCandidate
 logger = logging.getLogger(__name__)
 
 MAX_ROTATE_ATTEMPTS = 5
+# When no source works, a wallpaper is picked from this many recent ones still on disk.
+FALLBACK_POOL = 40
 FILTERED_SUBDIR = "filtered"
 OVERLAY_SUBDIR = "overlay"
 
 
 def _key(candidate: ImageCandidate) -> str:
     return f"{candidate.source_id}:{candidate.remote_id}"
+
+
+def describe_error(exc: Exception) -> str:
+    """A short, readable reason for a failed fetch or download (details go to the log)."""
+    if isinstance(exc, requests.Timeout):
+        return "the server did not answer in time"
+    if isinstance(exc, requests.ConnectionError):
+        return "could not connect (are you online?)"
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        if status == 429:
+            return "too many requests, try again later"
+        if status in (401, 403):
+            return "access refused, check the API key"
+        if status >= 500:
+            return f"the server has a problem right now (error {status})"
+        return f"request failed (error {status})"
+    return str(exc) or type(exc).__name__
 
 
 class RotationEngine(QObject):
@@ -50,6 +71,10 @@ class RotationEngine(QObject):
         self._effects: dict[Path, str] = {}
         # Images that failed the size/orientation requirements during this run.
         self._rejected: set[tuple[str | None, str]] = set()
+        # Why sources failed during the current rotation.
+        self._problems: list[str] = []
+        # True after a failed rotation was reported, until a rotation succeeds again.
+        self._failing = False
 
         self._quote: quotes.Quote | None = None
 
@@ -163,13 +188,17 @@ class RotationEngine(QObject):
         quote = self._current_quote()
         clock = self._clock_text()
         screen = self._screen_size(target)
-        if (quote or clock) and screen:
+        needs_copy = bool(quote or clock) or (
+            screen is not None and quality.image_size(shown_file) != screen
+        )
+        if needs_copy and screen:
+            # A screen-sized copy, scaled with a good filter (and with the overlays).
             # A fresh file name each time: Windows ignores a wallpaper path it already shows.
             tag = hashlib.sha1((target or "desktop").encode()).hexdigest()[:8]
             shown_file = overlay.render(
                 shown_file,
                 screen,
-                overlay_dir / f"{tag}-{time.time_ns()}.jpg",
+                overlay_dir / f"{path.stem[:50]}-{tag}-{time.time_ns()}.jpg",
                 quote=quote,
                 clock=clock,
             )
@@ -242,13 +271,18 @@ class RotationEngine(QObject):
     def _pick_and_show(
         self, sources: list, target: str | None, used: set[str]
     ) -> tuple[ImageCandidate, Path] | None:
+        sources = list(sources)
         for _ in range(MAX_ROTATE_ATTEMPTS):
+            if not sources:
+                break
             source = random.choice(sources)
             try:
                 candidates = source.fetch_candidates(count=3)
             except Exception as exc:
                 logger.exception("Failed to fetch candidates from source '%s'", source.id)
-                self.error_occurred.emit(f"{source.display_name}: {exc}")
+                # Don't keep asking a server that is down; the other sources get the turns.
+                sources.remove(source)
+                self._problems.append(f"{source.display_name}: {describe_error(exc)}")
                 continue
 
             candidates = [
@@ -284,10 +318,38 @@ class RotationEngine(QObject):
                     logger.exception(
                         "Failed to set wallpaper for candidate %s", candidate.remote_id
                     )
-                    self.error_occurred.emit(str(exc))
+                    self._problems.append(f"{source.display_name}: {describe_error(exc)}")
                     break
                 return candidate, local_path
         return None
+
+    def _on_rotation_failed(self) -> None:
+        """Nothing new could be fetched (typically a source is down or we are offline).
+        Keep the desktop changing with images already on disk, and say so only once."""
+        on_screen = {path for _, path in self._shown.values()}
+        fallback = [
+            entry
+            for entry in self.history.recent_entries(FALLBACK_POOL)
+            if entry[1] not in on_screen
+        ]
+        if fallback:
+            self._show(*random.choice(fallback))
+
+        if self._failing:
+            return  # already told; stay quiet until things work again
+        self._failing = True
+
+        if self._problems:
+            details = "\n".join(dict.fromkeys(self._problems))  # unique, in order
+            message = f"Could not get a new wallpaper.\n{details}"
+        else:
+            message = (
+                "Could not find a new wallpaper after several attempts. If this keeps "
+                "happening, relax the image requirements in Preferences > Display."
+            )
+        if fallback:
+            message += "\nShowing wallpapers you already have until it works again."
+        self.error_occurred.emit(message)
 
     def _protected_paths(self) -> set[Path]:
         protected = self.history.protected_paths()
@@ -311,6 +373,9 @@ class RotationEngine(QObject):
 
         targets = self._targets()
         self._advance_quote()
+        # Failures of single sources are only logged: the user hears about them only
+        # if no wallpaper could be found at all.
+        self._problems = []
         new: dict[str | None, tuple[ImageCandidate, Path]] = {}
         used: set[str] = set()
         for target in targets:
@@ -320,11 +385,9 @@ class RotationEngine(QObject):
                 used.add(_key(picked[0]))
 
         if not new:
-            self.error_occurred.emit(
-                "Could not find a new wallpaper after several attempts. If this keeps "
-                "happening, relax the image requirements in Preferences > Display."
-            )
+            self._on_rotation_failed()
             return
+        self._failing = False
 
         self._shown = {t: v for t, v in self._shown.items() if t in targets} | new
         on_screen = {path for _, path in self._shown.values()}
